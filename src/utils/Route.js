@@ -9,16 +9,15 @@
  * GPL 3.0 Licensed
  */
 
-
 /**
  * @type {import('../../').RouteItem[]}
  */
 const routes = [];
 const vaildMethods = ['get', 'delete', 'head', 'options', 'post', 'put', 'patch', 'purge', 'all', 'ws', 'upgrade'];
-const { statSync, readdirSync, readFileSync } = require('node:fs');
-const {pathToRegexp} = require('path-to-regexp');
+const { statSync, readdirSync } = require('node:fs');
+const { pathToRegexp } = require('path-to-regexp');
 const { join } = require('node:path');
-
+const nodePath = require('node:path')
 class Route {
     /**
      *  
@@ -37,7 +36,14 @@ class Route {
          * @example
          * /home/user/CDN/src/routes/test.js
          */
-        this._dir = new Error().stack.split('at ')[2].split(' ')[0].replace("file://", "").split(':').slice(0, -2).join(':')
+        this._dir = null;
+        if (process.platform === 'linux') {
+            this._dir = new Error().stack.split('at ')[2].split(' ')[0].replace("file://", "").split(':').slice(0, -2).join(':').replaceAll('%', ':')
+        } else if (process.platform === 'win32') {
+            this._dir = new Error().stack.split('at ')[2].split(' ')[1].replaceAll('(', '').replaceAll(')', '').replace(/:(\d+):(\d+)/g, '').replace(/C:\\/g, 'C:\\').replaceAll('%', ':')
+        } else {
+            this._dir = ""
+        }
 
         /**
          * @type {string}
@@ -50,7 +56,6 @@ class Route {
          * /api/v1/users/:id/:name
          */
         this._path = path;
-
 
         this._route = this._cutter(this._dir, this.path);
 
@@ -171,8 +176,8 @@ class Route {
      * @param {import('hyper-express').Server} app 
      * @returns {Promise<void>}
      */
-    run(req, res, app) {
-        return this._run(req, res, app);
+    run(req, res, app, route) {
+        return this._run(req, res, app, route);
     }
 
     /**
@@ -183,10 +188,17 @@ class Route {
      * @returns {String} The cut path (/tests/cool_test)
      */
     _cutter(filePath, exportPath) {
+        if (process.platform === 'linux') {
+            const splitPath = filePath.split('/routes').pop().split('/').slice(0, -1).join('/');
 
-        const splitPath = filePath.split('/routes').pop();
+            return `${splitPath}${exportPath.startsWith('/') ? exportPath : '/' + exportPath}`;
+        } else if (process.platform === 'win32') {
+            const splitPath = filePath.split('\\routes').pop().replace(/\\/g, '/').split('/').slice(0, -1).join('/');
 
-        return `${splitPath}${exportPath.startsWith('/') ? exportPath : '/' + exportPath}`;
+            return `${splitPath}${exportPath.startsWith('/') ? exportPath : '/' + exportPath}`;
+        } else {
+            return ""
+        }
     }
 
     /**
@@ -201,16 +213,18 @@ class Route {
         for (let i = 0; i < routes.length; i++) {
             const route = routes[i];
 
+            console.log(`[Hyper-Express] Setting Route: ${route.method} ${route.route}`);
+
             if (Array.isArray(route.method)) {
                 for (let j = 0; i < route.method.length; i++) {
                     app[(route.method[j].toLowerCase())](route.route, {
-                        middleware: [...route.middleware],
-                    }, (...args) => route.run(...args, app));
+                        middlewares: [...route.middleware],
+                    }, (...args) => route.run(...args, app, route));
                 }
             } else {
                 app[(route.method.toLowerCase())](route.route, {
-                    middleware: [...route.middleware],
-                }, (...args) => route.run(...args, app));
+                    middlewares: [...route.middleware],
+                }, (...args) => route.run(...args, app, route));
             }
         }
 
